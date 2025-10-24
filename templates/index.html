@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Система мониторинга датчиков - Sibur</title>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Header -->
+    <header class="main-header">
+        <div class="container">
+            <div class="header-content">
+                <div class="header-logo">
+                    <img src="{{ url_for('static', filename='img/sibur-logo.png') }}" 
+                         alt="Sibur" 
+                         class="logo-header"
+                         onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjYwIiB2aWV3Qm94PSIwIDAgMjAwIDYwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iNjAiIGZpbGw9IiMxMTg4OTkiLz48dGV4dCB4PSIxMDAiIHk9IjMwIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIj5TSUJVUjwvdGV4dD48L3N2Zz4='">
+                </div>
+                <div class="header-text">
+                    <h1 class="header-title">
+                        <i class="fas fa-chart-network"></i>
+                        Система мониторинга датчиков
+                    </h1>
+                    <p class="header-subtitle">Реальный мониторинг экологических параметров объектов</p>
+                </div>
+                <div class="header-status">
+                    <div class="status-indicator">
+                        <span class="status-dot online"></span>
+                        <span class="status-text">Система активна</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container-fluid main-container">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 sidebar">
+                <div class="sidebar-header">
+                    <h3><i class="fas fa-cogs"></i> Управление системой</h3>
+                </div>
+
+                <div class="d-grid gap-2 mb-3">
+                    <button class="btn btn-success" onclick="generateTestData()">
+                        <i class="fas fa-database"></i> Сгенерировать тестовые данные
+                    </button>
+                    <button class="btn btn-warning" onclick="clearData()">
+                        <i class="fas fa-trash-alt"></i> Очистить все данные
+                    </button>
+                </div>
+
+                <div class="sensor-selector">
+                    <h4><i class="fas fa-satellite-dish"></i> Выбранный датчик</h4>
+                    <div id="selected-sensor" class="selected-sensor-display">
+                        <i class="fas fa-sensor"></i> Не выбран
+                    </div>
+                    <div class="sensor-list">
+                        {% for sensor_id, sensor_info in sensor_locations.items() %}
+                        <button class="sensor-btn" onclick="selectSensor({{ sensor_id }})">
+                            <i class="fas fa-microchip"></i> Датчик {{ sensor_id }}: {{ sensor_info.name.split(' - ')[1] }}
+                        </button>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="system-status mt-4">
+                    <h4><i class="fas fa-chart-bar"></i> Статус системы</h4>
+                    <div id="system-status">
+                        <div class="status-item">
+                            <i class="fas fa-sensors"></i>
+                            Активных датчиков: <span id="active-sensors">0</span>/{{ sensor_locations|length }}
+                        </div>
+                        <div class="status-item">
+                            <i class="fas fa-database"></i>
+                            Всего записей: <span id="total-records">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="limits-info mt-4">
+                    <h4><i class="fas fa-ruler-combined"></i> Допустимые интервалы</h4>
+                    {% for param, config in sensor_config.items() %}
+                    <div class="limit-item">
+                        <strong><i class="fas fa-gauge-high"></i> {{ config.name }}:</strong><br>
+                        <span>{{ config.min }} - {{ config.max }} {{ config.unit }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-9 main-content">
+                <!-- Map Section -->
+                <div class="sensor-card">
+                    <h2><i class="fas fa-map-marked-alt"></i> Карта расположения датчиков</h2>
+                    <p class="card-description">Интерактивная карта объектов с реальными показаниями датчиков</p>
+                    <div id="map"></div>
+                </div>
+
+                <!-- Sensor Data Section -->
+                <div class="sensor-card" id="sensor-data-section" style="display: none;">
+                    <h2 id="sensor-title"><i class="fas fa-chart-line"></i> Данные с датчика</h2>
+                    
+                    <!-- Current Readings -->
+                    <div class="current-readings">
+                        <h3><i class="fas fa-gauge-high"></i> Текущие показания</h3>
+                        <div class="row" id="current-metrics">
+                            <!-- Metrics will be populated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <!-- Charts -->
+                    <div class="charts-section">
+                        <h3><i class="fas fa-chart-area"></i> Графики показаний за 24 часа</h3>
+                        <div class="chart-controls mb-3">
+                            <label>Выберите параметры для отображения:</label>
+                            <div class="parameter-selector">
+                                {% for param, config in sensor_config.items() %}
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" 
+                                           id="param-{{ param }}" value="{{ param }}"
+                                           {% if param in ['temperature', 'humidity'] %}checked{% endif %}>
+                                    <label class="form-check-label" for="param-{{ param }}">
+                                        <i class="fas fa-{{ get_param_icon(param) }}"></i> {{ config.name }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <button class="btn btn-primary mt-2" onclick="updateCharts()">
+                                <i class="fas fa-sync-alt"></i> Обновить графики
+                            </button>
+                        </div>
+                        <div id="charts-container" style="height: 600px;">
+                            <!-- Chart will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Statistics -->
+                    <div class="statistics-section">
+                        <h3><i class="fas fa-chart-pie"></i> Статистика датчика</h3>
+                        <div class="row" id="sensor-statistics">
+                            <!-- Statistics will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="main-footer">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="footer-section">
+                        <h5><i class="fas fa-info-circle"></i> О системе</h5>
+                        <p>Система мониторинга экологических параметров для объектов Sibur. Реальное время, точные данные, надежный контроль.</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="footer-section">
+                        <h5><i class="fas fa-headset"></i> Техническая поддержка</h5>
+                        <p>Вся важная информация и поддержка доступны в нашем Telegram-боте:</p>
+                        <a href="https://t.me/sibur_monitoring_bot" class="telegram-link" target="_blank">
+                            <i class="fab fa-telegram"></i> @sibur_monitoring_bot
+                        </a>
+                        <p class="support-note">Бот доступен 24/7 для ответов на вопросы и технической поддержки</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="footer-section">
+                        <h5><i class="fas fa-link"></i> Быстрые ссылки</h5>
+                        <ul class="footer-links">
+                            <li><a href="#"><i class="fas fa-book"></i> Документация</a></li>
+                            <li><a href="#"><i class="fas fa-download"></i> Отчеты</a></li>
+                            <li><a href="#"><i class="fas fa-cog"></i> Настройки</a></li>
+                            <li><a href="#"><i class="fas fa-envelope"></i> Обратная связь</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="copyright">
+                            <i class="fas fa-copyright"></i> 2024 Sibur. Все права защищены.
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="footer-info">
+                            <span class="version">Версия 2.1.0</span>
+                            <span class="update-time" id="update-time"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <script>
+        // Update footer time
+        function updateFooterTime() {
+            const now = new Date();
+            document.getElementById('update-time').textContent = 
+                'Обновлено: ' + now.toLocaleString('ru-RU');
+        }
+        
+        // Update time on load and every minute
+        updateFooterTime();
+        setInterval(updateFooterTime, 60000);
+    </script>
+</body>
+</html>
