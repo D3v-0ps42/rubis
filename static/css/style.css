@@ -557,3 +557,54 @@
 .ymaps-2-1-79-placemark-overlay {
     filter: none !important;
 }
+
+/* УБИРАЕМ ВСЕ FLEXBOX СТИЛИ КОТОРЫЕ ЛОМАЛИ СТРУКТУРУ */
+.main-container {
+    min-height: calc(100vh - 160px);
+    /* Убираем flex */
+    display: block;
+}
+
+.sidebar {
+    min-height: calc(100vh - 160px);
+    /* Убираем flex */
+    flex: none;
+}
+
+.main-content {
+    /* Убираем flex */
+    flex: none;
+    padding-left: 15px; /* Стандартный отступ Bootstrap */
+}
+
+.row {
+    margin: 0;
+    /* Возвращаем стандартное поведение */
+    flex-wrap: wrap;
+}
+
+/* Status colors for sensors */
+.sensor-status-normal {
+    background-color: #118899 !important;
+}
+
+.sensor-status-warning {
+    background-color: #FF6B35 !important;
+}
+
+/* Pulse animation for warning status */
+@keyframes pulse-warning {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+.sensor-status-warning {
+    animation: pulse-warning 2s infinite;
+}
+
+/* Selected sensor style */
+.sensor-selected {
+    border: 3px solid white !important;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5) !important;
+}

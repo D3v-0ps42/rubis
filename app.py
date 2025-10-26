@@ -3,18 +3,21 @@ from database import SensorDatabase
 from test_data_generator import generate_test_data
 from config import SENSOR_CONFIG, SENSOR_LOCATIONS
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from flask import send_from_directory
+import os
+import psycopg2
 
 app = Flask(__name__)
 
-# Инициализация базы данных
+# Инициализация основной базы данных
 db = SensorDatabase()
 
 # Функция для получения иконок параметров
 def get_param_icon(param):
     icons = {
         'temperature': 'temperature-high',
-        'pressure': 'wind',
+        'pressure': 'wind', 
         'humidity': 'tint',
         'gas_composition': 'smog',
         'noise_level': 'volume-up'
@@ -39,50 +42,59 @@ def get_sensor_data(sensor_id):
     if sensor_data.empty:
         return jsonify({'error': 'Нет данных'})
     
-    # Преобразуем данные для Chart.js - правильный формат с обновленными цветами Sibur
+    # ИСПРАВЛЕНИЕ: правильный порядок времени (слева-направо)
+    timestamps = sensor_data['timestamp'].dt.strftime('%H:%M').tolist()
+    timestamps.reverse()
+    
+    datasets = []
+    for dataset_config in [
+        {'label': 'Температура', 'field': 'temperature', 'color': '#118899'},
+        {'label': 'Давление', 'field': 'pressure', 'color': '#4FA8B5'},
+        {'label': 'Влажность', 'field': 'humidity', 'color': '#0D6A77'},
+        {'label': 'Уровень CO₂', 'field': 'gas_composition', 'color': '#1A9BA8'},
+        {'label': 'Уровень шума', 'field': 'noise_level', 'color': '#2CA3B0'}
+    ]:
+        data = sensor_data[dataset_config['field']].tolist()
+        data.reverse()
+        
+        datasets.append({
+            'label': dataset_config['label'],
+            'data': data,
+            'borderColor': dataset_config['color'],
+            'backgroundColor': 'rgba(17, 136, 153, 0.1)',
+            'yAxisID': 'y' if dataset_config['field'] in ['temperature', 'humidity', 'noise_level'] else 'y1'
+        })
+    
     data = {
-        'timestamps': sensor_data['timestamp'].dt.strftime('%H:%M').tolist(),
-        'datasets': [
-            {
-                'label': 'Температура',
-                'data': sensor_data['temperature'].tolist(),
-                'borderColor': '#118899',
-                'backgroundColor': 'rgba(17, 136, 153, 0.1)',
-                'yAxisID': 'y'
-            },
-            {
-                'label': 'Давление', 
-                'data': sensor_data['pressure'].tolist(),
-                'borderColor': '#4FA8B5',
-                'backgroundColor': 'rgba(79, 168, 181, 0.1)',
-                'yAxisID': 'y1'
-            },
-            {
-                'label': 'Влажность',
-                'data': sensor_data['humidity'].tolist(), 
-                'borderColor': '#0D6A77',
-                'backgroundColor': 'rgba(13, 106, 119, 0.1)',
-                'yAxisID': 'y'
-            },
-            {
-                'label': 'Уровень CO₂',
-                'data': sensor_data['gas_composition'].tolist(),
-                'borderColor': '#1A9BA8',
-                'backgroundColor': 'rgba(26, 155, 168, 0.1)',
-                'yAxisID': 'y1'
-            },
-            {
-                'label': 'Уровень шума',
-                'data': sensor_data['noise_level'].tolist(),
-                'borderColor': '#2CA3B0',
-                'backgroundColor': 'rgba(44, 163, 176, 0.1)',
-                'yAxisID': 'y'
-            }
-        ]
+        'timestamps': timestamps,
+        'datasets': datasets
     }
     
     return jsonify(data)
 
+# API для статистики уличных датчиков
+@app.route('/api/system_stats')
+def get_system_stats():
+    try:
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) FROM sensor_readings')
+        total_records = cursor.fetchone()[0]
+        
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        cursor.execute('SELECT COUNT(DISTINCT sensor_id) FROM sensor_readings WHERE timestamp > %s', (cutoff_time,))
+        active_sensors = cursor.fetchone()[0]
+        
+        return jsonify({
+            'total_records': total_records,
+            'active_sensors': active_sensors,
+            'total_sensors': len(SENSOR_LOCATIONS)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+# СУЩЕСТВУЮЩИЕ ЭНДПОИНТЫ
 @app.route('/api/sensor/<int:sensor_id>/stats')
 def get_sensor_stats(sensor_id):
     stats = db.get_sensor_statistics(sensor_id)
@@ -113,7 +125,6 @@ def api_generate_test_data():
         days = request.args.get('days', 1, type=int)
         records = generate_test_data(days)
         
-        # Return updated stats
         conn = db._get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM sensor_readings')
@@ -132,7 +143,6 @@ def api_clear_data():
     try:
         success = db.clear_database()
         
-        # Return updated stats after clearing
         conn = db._get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM sensor_readings')
@@ -142,27 +152,10 @@ def api_clear_data():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/system_stats')
-def get_system_stats():
-    try:
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        
-        # Get total records count
-        cursor.execute('SELECT COUNT(*) FROM sensor_readings')
-        total_records = cursor.fetchone()[0]
-        
-        # Get active sensors count (sensors with data in last 24 hours)
-        cutoff_time = datetime.now() - datetime.timedelta(hours=24)
-        cursor.execute('SELECT COUNT(DISTINCT sensor_id) FROM sensor_readings WHERE timestamp > %s', (cutoff_time,))
-        active_sensors = cursor.fetchone()[0]
-        
-        return jsonify({
-            'total_records': total_records,
-            'active_sensors': active_sensors
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)})
+@app.route('/api/sensor_config')
+def get_sensor_config():
+    """Отдаем конфигурацию датчиков в JavaScript"""
+    return jsonify(SENSOR_CONFIG)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

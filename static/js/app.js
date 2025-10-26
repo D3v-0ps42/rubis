@@ -3,30 +3,75 @@ let ymap;
 let selectedSensor = null;
 let sensorObjects = {};
 let sensorChart = null;
-// Обновленные цвета в стиле Sibur
-const sensorColors = {
-    1: '#118899',
-    2: '#4FA8B5', 
-    3: '#0D6A77',
-    4: '#1A9BA8',
-    5: '#2CA3B0'
-};
+let sensorConfig = null; // ← Добавляем для хранения конфига
+
+// Colors for sensors
+const normalColor = '#118899'; // Sibur blue
+const warningColor = '#FF6B35'; // Sibur orange
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
-    initializeYandexMap();
-    loadSystemStats();
-    setInterval(loadSystemStats, 30000); // Update every 30 seconds
+    loadSensorConfig().then(() => {
+        initializeYandexMap();
+        loadSystemStats();
+        setInterval(loadSystemStats, 30000);
+        setInterval(loadLatestReadings, 30000);
+    });
 });
 
-// Initialize Yandex Map with Sirius University coordinates
+// Загружаем конфиг с сервера
+function loadSensorConfig() {
+    return fetch('/api/sensor_config')
+        .then(response => response.json())
+        .then(config => {
+            sensorConfig = config;
+            console.log('Sensor config loaded:', sensorConfig);
+        })
+        .catch(error => {
+            console.error('Error loading sensor config:', error);
+            // Fallback конфиг на случай ошибки
+            sensorConfig = {
+                'temperature': { norm_min: 18.0, norm_max: 24.0, unit: '°C' },
+                'pressure': { norm_min: 98.0, norm_max: 105.0, unit: 'kPa' },
+                'humidity': { norm_min: 30.0, norm_max: 60.0, unit: '%' },
+                'gas_composition': { norm_min: 400.0, norm_max: 600.0, unit: 'ppm' },
+                'noise_level': { norm_min: 0.0, norm_max: 50.0, unit: 'dB' }
+            };
+        });
+}
+
+// Единая функция получения конфига
+function getMetricConfig(metricKey) {
+    if (!sensorConfig || !sensorConfig[metricKey]) {
+        console.error('Config not loaded for:', metricKey);
+        return { norm_min: 0, norm_max: 100, unit: '' };
+    }
+    return sensorConfig[metricKey];
+}
+
+// Проверка на нормальность
+function isParameterNormal(paramName, value) {
+    const config = getMetricConfig(paramName);
+    return value >= config.norm_min && value <= config.norm_max;
+}
+
+// Проверка ВСЕХ параметров для статуса датчика
+function areAllParametersNormal(data) {
+    if (!data) return false;
+    
+    return isParameterNormal('temperature', data.temperature) &&
+           isParameterNormal('pressure', data.pressure) &&
+           isParameterNormal('humidity', data.humidity) &&
+           isParameterNormal('gas_composition', data.gas_composition) &&
+           isParameterNormal('noise_level', data.noise_level);
+}
+
+// Initialize Yandex Map
 function initializeYandexMap() {
-    // Initialize map without API key (free tier)
     const script = document.createElement('script');
     script.src = 'https://api-maps.yandex.ru/2.1/?lang=ru_RU';
     script.onload = function() {
         ymaps.ready(function() {
-            // Sirius University coordinates: [43.414283, 39.950436]
             ymap = new ymaps.Map('map', {
                 center: [43.414283, 39.950436],
                 zoom: 17
@@ -34,7 +79,6 @@ function initializeYandexMap() {
                 searchControlProvider: 'yandex#search'
             });
             
-            // Add sensor markers
             addSensorMarkers();
             loadLatestReadings();
         });
@@ -42,118 +86,160 @@ function initializeYandexMap() {
     document.head.appendChild(script);
 }
 
-// Add sensors to Yandex Map around Sirius University
+// Add sensors to Yandex Map - FIXED: use full names from config
 function addSensorMarkers() {
     const sensorLocations = {
-        1: { lat: 43.414283, lng: 39.950436, name: 'Главный корпус' },
-        2: { lat: 43.4145, lng: 39.951, name: 'Лаборатория' },
-        3: { lat: 43.4138, lng: 39.9498, name: 'Склад' },
-        4: { lat: 43.415, lng: 39.9508, name: 'Парковка' },
-        5: { lat: 43.414, lng: 39.9512, name: 'Офис' }
+        1: { lat: 43.414283, lng: 39.950436, name: 'Датчик №1 - Главный корпус' },
+        2: { lat: 43.4145, lng: 39.951, name: 'Датчик №2 - Лаборатория' },
+        3: { lat: 43.4138, lng: 39.9498, name: 'Датчик №3 - Склад' },
+        4: { lat: 43.415, lng: 39.9508, name: 'Датчик №4 - Парковка' },
+        5: { lat: 43.414, lng: 39.9512, name: 'Датчик №5 - Офис' }
     };
     
     for (const [sensorId, location] of Object.entries(sensorLocations)) {
         const marker = new ymaps.Placemark([location.lat, location.lng], {
-            balloonContent: `<b>Датчик ${sensorId}</b><br>${location.name}`,
-            hintContent: `Датчик ${sensorId}`
+            balloonContent: `<b>${location.name}</b><br>Статус: Загрузка...`,
+            hintContent: location.name
         }, {
             preset: 'islands#circleIcon',
-            iconColor: sensorColors[sensorId]
+            iconColor: normalColor,
+            iconImageSize: [22, 22]
         });
         
         marker.events.add('click', function() {
-            selectSensor(parseInt(sensorId));
+            selectSensor(parseInt(sensorId), location.name);
         });
         
         ymap.geoObjects.add(marker);
-        sensorObjects[sensorId] = marker;
+        sensorObjects[sensorId] = {
+            marker: marker,
+            name: location.name
+        };
     }
 }
 
-// Select sensor - FIXED LOGIC: markers keep their status colors
-function selectSensor(sensorId) {
+// Select sensor function
+function selectSensor(sensorId, sensorName = null) {
     selectedSensor = sensorId;
     
-    // Update UI
+    // Get sensor name if not provided
+    if (!sensorName && sensorObjects[sensorId]) {
+        sensorName = sensorObjects[sensorId].name;
+    }
+    
+    // Update UI buttons
     document.querySelectorAll('.sensor-btn').forEach(btn => {
         btn.classList.remove('active');
+        if (parseInt(btn.getAttribute('data-sensor-id')) === sensorId) {
+            btn.classList.add('active');
+        }
     });
-    event.target.classList.add('active');
     
     // Update selected sensor display
-    const sensorName = event.target.textContent;
-    document.getElementById('selected-sensor').textContent = sensorName;
+    document.getElementById('selected-sensor').innerHTML = 
+        `<i class="fas fa-microchip"></i> ${sensorName || `Датчик ${sensorId}`}`;
     
     // Show sensor data section
     document.getElementById('sensor-data-section').style.display = 'block';
-    document.getElementById('sensor-title').textContent = `📊 Данные с ${sensorName}`;
+    document.getElementById('sensor-title').innerHTML = 
+        `<i class="fas fa-chart-line"></i> Данные с ${sensorName || `Датчика ${sensorId}`}`;
+    
+    // Update markers - keep status colors but highlight selected
+    updateMarkerSelection();
     
     // Load sensor data
     loadSensorData(sensorId);
     loadSensorStatistics(sensorId);
-    
-    // FIXED: Don't change marker colors, only add selection indicator
-    Object.values(sensorObjects).forEach(marker => {
-        // Remove any selection indicator but keep original status color
-        const originalColor = getOriginalMarkerColor(marker);
-        marker.options.set('iconColor', originalColor);
+}
+
+// Update marker selection
+function updateMarkerSelection() {
+    Object.entries(sensorObjects).forEach(([sensorId, sensorObj]) => {
+        const isSelected = selectedSensor == sensorId;
+        const currentColor = sensorObj.marker.options.get('iconColor');
+        
+        sensorObj.marker.options.set({
+            iconColor: currentColor, // Keep current status color
+            iconImageSize: isSelected ? [30, 30] : [22, 22]
+        });
     });
-    
-    if (sensorObjects[sensorId]) {
-        // Add selection indicator (darker border effect)
-        const originalColor = getOriginalMarkerColor(sensorObjects[sensorId]);
-        sensorObjects[sensorId].options.set({
-            iconColor: originalColor,
-            iconImageSize: [30, 30] // Slightly larger when selected
+}
+
+// Update sensor statuses on Yandex Map - FIXED: используем единую логику
+function updateSensorStatuses(latestData) {
+    for (const [sensorId, data] of Object.entries(latestData)) {
+        if (!sensorObjects[sensorId]) continue;
+        
+        // Проверяем ВСЕ параметры по фиксированным диапазонам
+        const allNormal = areAllParametersNormal(data);
+        const color = allNormal ? normalColor : warningColor;
+        const status = allNormal ? '🟢 Норма' : '🟠 Внимание';
+        
+        const marker = sensorObjects[sensorId].marker;
+        
+        // Update balloon content with ALL parameters
+        marker.properties.set({
+            balloonContent: `
+                <b>${sensorObjects[sensorId].name}</b><br>
+                Температура: ${data.temperature?.toFixed(1) || 'N/A'}°C<br>
+                Давление: ${data.pressure?.toFixed(1) || 'N/A'} kPa<br>
+                Влажность: ${data.humidity?.toFixed(1) || 'N/A'}%<br>
+                Уровень CO₂: ${data.gas_composition?.toFixed(1) || 'N/A'} ppm<br>
+                Уровень шума: ${data.noise_level?.toFixed(1) || 'N/A'} dB<br>
+                Статус: ${status}<br>
+                <small>${new Date(data.timestamp).toLocaleString('ru-RU')}</small>
+            `
+        });
+        
+        // Update color based on status, preserve selection state
+        const isSelected = selectedSensor == sensorId;
+        marker.options.set({
+            iconColor: color,
+            iconImageSize: isSelected ? [30, 30] : [22, 22]
         });
     }
 }
 
-// Helper function to get original marker color based on sensor ID
-function getOriginalMarkerColor(marker) {
-    // Find which sensor this marker belongs to
-    for (const [sensorId, markerObj] of Object.entries(sensorObjects)) {
-        if (markerObj === marker) {
-            // Check if we have status data for this sensor
-            // This would need to be implemented based on your status data
-            return sensorColors[sensorId];
-        }
-    }
-    return '#118899'; // Default Sibur color
-}
-
-// Update sensor statuses on Yandex Map - FIXED: preserve selection
-function updateSensorStatuses(latestData) {
-    for (const [sensorId, data] of Object.entries(latestData)) {
-        const temperature = data.temperature;
-        const isNormal = temperature >= 18 && temperature <= 26;
-        
-        if (sensorObjects[sensorId]) {
-            const color = isNormal ? sensorColors[sensorId] : '#FF6B6B';
-            const status = isNormal ? '🟢 Норма' : '🔴 Внимание';
+// Обновляем блоки над графиками - используем ТУ ЖЕ ЛОГИКУ
+function updateCurrentMetrics(data) {
+    const metricsContainer = document.getElementById('current-metrics');
+    metricsContainer.innerHTML = '';
+    
+    const metrics = [
+        { key: 'temperature', name: 'Температура', icon: '🌡️' },
+        { key: 'pressure', name: 'Давление', icon: '🌪️' },
+        { key: 'humidity', name: 'Влажность', icon: '💧' },
+        { key: 'gas_composition', name: 'Уровень CO₂', icon: '🌫️' },
+        { key: 'noise_level', name: 'Уровень шума', icon: '📢' }
+    ];
+    
+    metrics.forEach(metric => {
+        const dataset = data.datasets.find(ds => getParameterKey(ds.label) === metric.key);
+        if (dataset && dataset.data && dataset.data.length > 0) {
+            const latestValue = dataset.data[0];
+            const metricConfig = getMetricConfig(metric.key);
             
-            // Update balloon content with current status
-            sensorObjects[sensorId].properties.set({
-                balloonContent: `
-                    <b>Датчик ${sensorId}</b><br>
-                    Температура: ${temperature.toFixed(1)}°C<br>
-                    Статус: ${status}<br>
-                    <small>${new Date().toLocaleString()}</small>
-                `
-            });
+            // ← ВОТ ТА ЖЕ САМАЯ ПРОВЕРКА ЧТО И ДЛЯ КАРТЫ!
+            const isNormal = isParameterNormal(metric.key, latestValue);
+            const cardClass = isNormal ? 'border-success' : 'border-warning';
             
-            // Update icon color but preserve selection state
-            // If this sensor is selected, keep the larger size
-            const isSelected = selectedSensor == sensorId;
-            sensorObjects[sensorId].options.set({
-                iconColor: color,
-                iconImageSize: isSelected ? [30, 30] : [22, 22]
-            });
+            const metricHTML = `
+                <div class="col">
+                    <div class="card ${cardClass}">
+                        <div class="card-body">
+                            <h5 class="card-title">${metric.icon} ${metric.name}</h5>
+                            <div class="value">${latestValue.toFixed(1)}${metricConfig.unit}</div>
+                            <div class="range-label" style="color: #666; font-size: 0.8rem; margin-top: 0.5rem;">диапазон нормы</div>
+                            <div class="range">${metricConfig.norm_min}-${metricConfig.norm_max} ${metricConfig.unit}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            metricsContainer.innerHTML += metricHTML;
         }
-    }
+    });
 }
-
-// ... остальной код без изменений (loadSystemStats, loadLatestReadings, etc.) ...
 
 // Load sensor data for charts
 function loadSensorData(sensorId) {
@@ -186,64 +272,9 @@ function showNoDataMessage() {
     `;
 }
 
-// Update current metrics display
-function updateCurrentMetrics(data) {
-    const metricsContainer = document.getElementById('current-metrics');
-    metricsContainer.innerHTML = '';
-    
-    const metrics = [
-        { key: 'temperature', name: 'Температура', icon: '🌡️', unit: '°C' },
-        { key: 'pressure', name: 'Давление', icon: '🌪️', unit: 'кПа' },
-        { key: 'humidity', name: 'Влажность', icon: '💧', unit: '%' },
-        { key: 'gas_composition', name: 'Уровень CO₂', icon: '🌫️', unit: 'ppm' },
-        { key: 'noise_level', name: 'Уровень шума', icon: '📢', unit: 'дБ' }
-    ];
-    
-    // Get the latest values from the first data point (most recent)
-    metrics.forEach(metric => {
-        // Find the dataset for this metric
-        const dataset = data.datasets.find(ds => getParameterKey(ds.label) === metric.key);
-        if (dataset && dataset.data && dataset.data.length > 0) {
-            const latestValue = dataset.data[0];
-            const metricConfig = getMetricConfig(metric.key);
-            
-            const isNormal = latestValue >= metricConfig.min && latestValue <= metricConfig.max;
-            const cardClass = isNormal ? 'border-success' : 'border-warning';
-            
-            const metricHTML = `
-                <div class="col">
-                    <div class="card ${cardClass}">
-                        <div class="card-body">
-                            <h5 class="card-title">${metric.icon} ${metric.name}</h5>
-                            <div class="value">${latestValue.toFixed(1)}${metric.unit}</div>
-                            <div class="range">${metricConfig.min}-${metricConfig.max} ${metric.unit}</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            metricsContainer.innerHTML += metricHTML;
-        }
-    });
-}
-
-// Get metric configuration
-function getMetricConfig(metricKey) {
-    const config = {
-        'temperature': { min: 15, max: 35, unit: '°C' },
-        'pressure': { min: 98, max: 105, unit: 'кПа' },
-        'humidity': { min: 20, max: 95, unit: '%' },
-        'gas_composition': { min: 350, max: 2000, unit: 'ppm' },
-        'noise_level': { min: 35, max: 85, unit: 'дБ' }
-    };
-    
-    return config[metricKey] || { min: 0, max: 100, unit: '' };
-}
-
-// Update charts - COMPLETELY REWRITTEN
+// Update charts
 function updateCharts(sensorData = null) {
     if (!sensorData && selectedSensor) {
-        // If no data provided, load it
         loadSensorData(selectedSensor);
         return;
     }
@@ -281,7 +312,6 @@ function updateCharts(sensorData = null) {
         data: {
             labels: sensorData.timestamps,
             datasets: filteredDatasets.map((dataset, index) => {
-                // Обновляем цвета графиков в стиле Sibur
                 const colors = [
                     { border: '#118899', background: 'rgba(17, 136, 153, 0.1)' },
                     { border: '#4FA8B5', background: 'rgba(79, 168, 181, 0.1)' },
@@ -324,7 +354,7 @@ function updateCharts(sensorData = null) {
                     position: 'left',
                     title: {
                         display: true,
-                        text: 'Температура (°C), Влажность (%), Уровень шума (дБ)'
+                        text: 'Температура (°C), Влажность (%), Уровень шума (dB)'
                     }
                 },
                 y1: {
@@ -333,7 +363,7 @@ function updateCharts(sensorData = null) {
                     position: 'right',
                     title: {
                         display: true,
-                        text: 'Давление (кПа), Уровень CO₂ (ppm)'
+                        text: 'Давление (kPa), Уровень CO₂ (ppm)'
                     },
                     grid: {
                         drawOnChartArea: false,
@@ -344,7 +374,7 @@ function updateCharts(sensorData = null) {
                 title: {
                     display: true,
                     text: `Показания датчика ${selectedSensor} за последние 24 часа`,
-                    color: '#118899', // Обновленный цвет заголовка
+                    color: '#118899',
                     font: {
                         size: 16
                     }
@@ -472,7 +502,7 @@ function updateStatisticsDisplay(stats) {
                     return `
                         <div class="alert alert-light">
                             <strong>${getParameterName(param)}:</strong><br>
-                            ${config.min} - ${config.max} ${config.unit}
+                            ${config.norm_min} - ${config.norm_max} ${config.unit}
                         </div>
                     `;
                 }).join('')}
@@ -499,14 +529,11 @@ function generateTestData() {
         .then(data => {
             if (data.success) {
                 alert(`Успешно сгенерировано ${data.records} записей!`);
-                // Update system stats
                 loadSystemStats();
-                // Reload current sensor data if selected
                 if (selectedSensor) {
                     loadSensorData(selectedSensor);
                     loadSensorStatistics(selectedSensor);
                 }
-                // Update sensor statuses
                 loadLatestReadings();
             } else {
                 alert('Ошибка генерации: ' + data.error);
@@ -537,14 +564,11 @@ function clearData() {
         .then(data => {
             if (data.success) {
                 alert('Все данные успешно очищены!');
-                // Update system stats
                 loadSystemStats();
-                // Reload current sensor data if selected
                 if (selectedSensor) {
                     loadSensorData(selectedSensor);
                     loadSensorStatistics(selectedSensor);
                 }
-                // Update sensor statuses
                 loadLatestReadings();
             } else {
                 alert('Ошибка очистки: ' + data.error);

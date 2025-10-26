@@ -37,23 +37,23 @@ class TestDataGenerator:
     
     def _generate_sensor_data(self, sensor_id, start_time, end_time, interval_minutes):
         """Генерация данных для одного датчика"""
-        current_time = start_time
+        current_time = start_time  # ← ДОБАВИЛ ИНИЦИАЛИЗАЦИЮ current_time
         records_added = 0
         batch_data = []
         
-        # Базовые значения для каждого датчика (немного разные)
+        # Базовые значения для каждого датчика в пределах генерации
         base_values = {
-            'noise': random.uniform(40.0, 70.0),
-            'gas': random.uniform(400.0, 1000.0),
-            'pressure': random.uniform(100.0, 102.0),
-            'humidity': random.uniform(40.0, 80.0),
-            'temperature': random.uniform(18.0, 28.0)
+            'noise': random.uniform(SENSOR_CONFIG['noise_level']['gen_min'], SENSOR_CONFIG['noise_level']['gen_max']),
+            'gas': random.uniform(SENSOR_CONFIG['gas_composition']['gen_min'], SENSOR_CONFIG['gas_composition']['gen_max']),
+            'pressure': random.uniform(SENSOR_CONFIG['pressure']['gen_min'], SENSOR_CONFIG['pressure']['gen_max']),
+            'humidity': random.uniform(SENSOR_CONFIG['humidity']['gen_min'], SENSOR_CONFIG['humidity']['gen_max']),
+            'temperature': random.uniform(SENSOR_CONFIG['temperature']['gen_min'], SENSOR_CONFIG['temperature']['gen_max'])
         }
         
         while current_time < end_time:
             # Получаем час дня для реалистичных циклов
             hour = current_time.hour
-            
+            '''
             # Генерация данных с суточными вариациями
             if 0 <= hour <= 6:  # Ночь
                 noise_variation = -10.0
@@ -71,20 +71,27 @@ class TestDataGenerator:
                 noise_variation = 0.0
                 temp_variation = 0.0
                 humidity_variation = 0.0
-            
+
             # Генерируем значения с вариациями
-            noise = base_values['noise'] + noise_variation + random.uniform(-5.0, 5.0)
-            gas = base_values['gas'] + random.uniform(-50.0, 50.0)
+            noise = base_values['noise'] + noise_variation + random.uniform(-1.0, 1.0)
+            gas = base_values['gas'] + random.uniform(-5.0, 5.0)
             pressure = base_values['pressure'] + random.uniform(-0.5, 0.5)
-            humidity = base_values['humidity'] + humidity_variation + random.uniform(-5.0, 5.0)
-            temperature = base_values['temperature'] + temp_variation + random.uniform(-2.0, 2.0)
+            humidity = base_values['humidity'] + humidity_variation + random.uniform(-1.0, 1.0)
+            temperature = base_values['temperature'] + temp_variation + random.uniform(-1.0, 1.0)
+            '''
+            # Генерируем значения без вариаций
+            noise = base_values['noise'] + random.uniform(-1.0, 1.0)
+            gas = base_values['gas'] + random.uniform(-5.0, 5.0)
+            pressure = base_values['pressure'] + random.uniform(-0.5, 0.5)
+            humidity = base_values['humidity'] + random.uniform(-1.0, 1.0)
+            temperature = base_values['temperature'] + random.uniform(-1.0, 1.0)
             
-            # Ограничиваем значения разумными пределами
-            noise = max(30, min(90, noise))
-            gas = max(350, min(2000, gas))
-            pressure = max(98, min(105, pressure))
-            humidity = max(20, min(95, humidity))
-            temperature = max(15, min(35, temperature))
+            # Ограничиваем значения диапазонами генерации
+            noise = max(SENSOR_CONFIG['noise_level']['gen_min'], min(SENSOR_CONFIG['noise_level']['gen_max'], noise))
+            gas = max(SENSOR_CONFIG['gas_composition']['gen_min'], min(SENSOR_CONFIG['gas_composition']['gen_max'], gas))
+            pressure = max(SENSOR_CONFIG['pressure']['gen_min'], min(SENSOR_CONFIG['pressure']['gen_max'], pressure))
+            humidity = max(SENSOR_CONFIG['humidity']['gen_min'], min(SENSOR_CONFIG['humidity']['gen_max'], humidity))
+            temperature = max(SENSOR_CONFIG['temperature']['gen_min'], min(SENSOR_CONFIG['temperature']['gen_max'], temperature))
             
             # Добавляем в батч
             batch_data.append((

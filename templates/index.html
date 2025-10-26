@@ -69,8 +69,9 @@
                     </div>
                     <div class="sensor-list">
                         {% for sensor_id, sensor_info in sensor_locations.items() %}
-                        <button class="sensor-btn" onclick="selectSensor({{ sensor_id }})">
-                            <i class="fas fa-microchip"></i> Датчик {{ sensor_id }}: {{ sensor_info.name.split(' - ')[1] }}
+                        <button class="sensor-btn" onclick="selectSensor({{ sensor_id }}, '{{ sensor_info.name }}')" 
+                                data-sensor-id="{{ sensor_id }}">
+                            <i class="fas fa-microchip"></i> {{ sensor_info.name }}
                         </button>
                         {% endfor %}
                     </div>
@@ -196,7 +197,7 @@
                 <div class="row">
                     <div class="col-md-6">
                         <p class="copyright">
-                            <i class="fas fa-copyright"></i> 2024 Sibur. Все права защищены.
+                            <i class="fas fa-copyright"></i> 2025 Sibur. Все права защищены.
                         </p>
                     </div>
                     <div class="col-md-6">
