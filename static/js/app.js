@@ -3,12 +3,14 @@ let ymap;
 let selectedSensor = null;
 let sensorObjects = {};
 let sensorChart = null;
-let sensorConfig = null; // ← Добавляем для хранения конфига
+let sensorConfig = null;
 let sensorLocations = null;
 
 // Colors for sensors
 const normalColor = '#118899'; // Sibur blue
 const warningColor = '#FF6B35'; // Sibur orange
+const noDataColor = '#CCCCCC'; // Серый для отсутствия данных
+const realSensorColor = '#FF5722'; // Оранжевый для реального датчика
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
@@ -21,6 +23,12 @@ document.addEventListener('DOMContentLoaded', function() {
         loadSystemStats();
         setInterval(loadSystemStats, 30000);
         setInterval(loadLatestReadings, 30000);
+        // Для реального датчика обновляем данные чаще
+        setInterval(() => {
+            if (selectedSensor === 99) {
+                loadRealSensorData();
+            }
+        }, 10000); // Каждые 10 секунд
     });
 });
 
@@ -101,7 +109,7 @@ function initializeYandexMap() {
     document.head.appendChild(script);
 }
 
-// Add sensors to Yandex Map - FIXED: use full names from config
+// Add sensors to Yandex Map
 function addSensorMarkers() {
     if (!sensorLocations) {
         console.error('Sensor locations not loaded');
@@ -110,11 +118,11 @@ function addSensorMarkers() {
     
     for (const [sensorId, location] of Object.entries(sensorLocations)) {
         const marker = new ymaps.Placemark([location.lat, location.lng], {
-            balloonContent: `<b>${location.name}</b><br>Статус: Загрузка...`,
+            balloonContent: `<b>${location.name}</b><br>Статус: Нет данных`,
             hintContent: location.name
         }, {
             preset: 'islands#circleIcon',
-            iconColor: location.color || normalColor, // Используем цвет из конфига
+            iconColor: noDataColor, // Серый по умолчанию
             iconImageSize: [22, 22]
         });
         
@@ -126,7 +134,7 @@ function addSensorMarkers() {
         sensorObjects[sensorId] = {
             marker: marker,
             name: location.name,
-            color: location.color || normalColor // Сохраняем оригинальный цвет
+            isRealSensor: sensorId === '99'
         };
     }
 }
@@ -154,15 +162,25 @@ function selectSensor(sensorId, sensorName = null) {
     
     // Show sensor data section
     document.getElementById('sensor-data-section').style.display = 'block';
-    document.getElementById('sensor-title').innerHTML = 
-        `<i class="fas fa-chart-line"></i> Данные с ${sensorName || `Датчика ${sensorId}`}`;
+    
+    // Для реального датчика меняем заголовок и скрываем графики
+    if (sensorId === 99) {
+        document.getElementById('sensor-title').innerHTML = 
+            `<i class="fas fa-satellite"></i> Реальные данные с ESP32`;
+        document.querySelector('.charts-section').style.display = 'none';
+        document.querySelector('.statistics-section').style.display = 'none';
+        loadRealSensorData();
+    } else {
+        document.getElementById('sensor-title').innerHTML = 
+            `<i class="fas fa-chart-line"></i> Данные с ${sensorName || `Датчика ${sensorId}`}`;
+        document.querySelector('.charts-section').style.display = 'block';
+        document.querySelector('.statistics-section').style.display = 'block';
+        loadSensorData(sensorId);
+        loadSensorStatistics(sensorId);
+    }
     
     // Update markers - keep status colors but highlight selected
     updateMarkerSelection();
-    
-    // Load sensor data
-    loadSensorData(sensorId);
-    loadSensorStatistics(sensorId);
 }
 
 // Update marker selection
@@ -173,50 +191,32 @@ function updateMarkerSelection() {
         
         sensorObj.marker.options.set({
             iconColor: currentColor, // Keep current status color
-            iconImageSize: isSelected ? [30, 30] : [22, 22]
+            iconImageSize: isSelected ? [30, 30] : (sensorObj.isRealSensor ? [26, 26] : [22, 22])
         });
     });
 }
 
-// Update sensor statuses on Yandex Map - FIXED: используем единую логику
-function updateSensorStatuses(latestData) {
-    for (const [sensorId, data] of Object.entries(latestData)) {
-        if (!sensorObjects[sensorId]) continue;
-        
-        // Проверяем ВСЕ параметры по фиксированным диапазонам
-        const allNormal = areAllParametersNormal(data);
-        const color = allNormal ? (sensorObjects[sensorId].color || normalColor) : warningColor;
-        const status = allNormal ? '🟢 Норма' : '🟠 Внимание';
-        
-        const marker = sensorObjects[sensorId].marker;
-        
-        // Update balloon content with ALL parameters
-        marker.properties.set({
-            balloonContent: `
-                <b>${sensorObjects[sensorId].name}</b><br>
-                Температура: ${data.temperature?.toFixed(1) || 'N/A'}°C<br>
-                Давление: ${data.pressure?.toFixed(1) || 'N/A'} kPa<br>
-                Влажность: ${data.humidity?.toFixed(1) || 'N/A'}%<br>
-                Уровень CO₂: ${data.gas_composition?.toFixed(1) || 'N/A'} ppm<br>
-                Уровень шума: ${data.noise_level?.toFixed(1) || 'N/A'} dB<br>
-                Статус: ${status}<br>
-                <small>${new Date(data.timestamp).toLocaleString('ru-RU')}</small>
-            `
+// Функция для загрузки данных реального датчика
+function loadRealSensorData() {
+    fetch('/api/real_sensor/latest')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.temperature !== undefined) {
+                updateRealSensorDisplay(data);
+                updateRealSensorOnMap(data);
+            } else {
+                showNoRealSensorData();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading real sensor data:', error);
+            showNoRealSensorData();
         });
-        
-        // Update color based on status, preserve selection state
-        const isSelected = selectedSensor == sensorId;
-        marker.options.set({
-            iconColor: color,
-            iconImageSize: isSelected ? [30, 30] : [22, 22]
-        });
-    }
 }
 
-// Обновляем блоки над графиками - используем ТУ ЖЕ ЛОГИКУ
-function updateCurrentMetrics(data) {
+// Обновляем отображение данных реального датчика
+function updateRealSensorDisplay(data) {
     const metricsContainer = document.getElementById('current-metrics');
-    metricsContainer.innerHTML = '';
     
     const metrics = [
         { key: 'temperature', name: 'Температура', icon: '🌡️' },
@@ -226,37 +226,88 @@ function updateCurrentMetrics(data) {
         { key: 'noise_level', name: 'Уровень шума', icon: '📢' }
     ];
     
+    let metricsHTML = '';
+    
     metrics.forEach(metric => {
-        const dataset = data.datasets.find(ds => getParameterKey(ds.label) === metric.key);
-        if (dataset && dataset.data && dataset.data.length > 0) {
-            const latestValue = dataset.data[0];
+        const value = data[metric.key];
+        if (value !== undefined) {
             const metricConfig = getMetricConfig(metric.key);
-            
-            // ← ВОТ ТА ЖЕ САМАЯ ПРОВЕРКА ЧТО И ДЛЯ КАРТЫ!
-            const isNormal = isParameterNormal(metric.key, latestValue);
+            const isNormal = isParameterNormal(metric.key, value);
             const cardClass = isNormal ? 'border-success' : 'border-warning';
             
-            const metricHTML = `
+            metricsHTML += `
                 <div class="col">
                     <div class="card ${cardClass}">
                         <div class="card-body">
                             <h5 class="card-title">${metric.icon} ${metric.name}</h5>
-                            <div class="value">${latestValue.toFixed(1)}${metricConfig.unit}</div>
+                            <div class="value">${value.toFixed(1)}${metricConfig.unit}</div>
                             <div class="range-label" style="color: #666; font-size: 0.8rem; margin-top: 0.5rem;">диапазон нормы</div>
                             <div class="range">${metricConfig.norm_min}-${metricConfig.norm_max} ${metricConfig.unit}</div>
+                            <div class="timestamp" style="color: #888; font-size: 0.7rem; margin-top: 0.5rem;">
+                                ${data.timestamp || 'Текущие данные'}
+                            </div>
                         </div>
                     </div>
                 </div>
             `;
-            
-            metricsContainer.innerHTML += metricHTML;
         }
+    });
+    
+    metricsContainer.innerHTML = metricsHTML;
+}
+
+// Обновляем реальный датчик на карте
+function updateRealSensorOnMap(data) {
+    if (!sensorObjects['99']) return;
+    
+    const allNormal = areAllParametersNormal(data);
+    const color = allNormal ? normalColor : warningColor;
+    const status = allNormal ? '🟢 Норма' : '🟠 Внимание';
+    
+    const marker = sensorObjects['99'].marker;
+    
+    marker.properties.set({
+        balloonContent: `
+            <b>${sensorObjects['99'].name}</b><br>
+            Температура: ${data.temperature?.toFixed(1) || 'N/A'}°C<br>
+            Давление: ${data.pressure?.toFixed(1) || 'N/A'} kPa<br>
+            Влажность: ${data.humidity?.toFixed(1) || 'N/A'}%<br>
+            Уровень CO₂: ${data.gas_composition?.toFixed(1) || 'N/A'} ppm<br>
+            Уровень шума: ${data.noise_level?.toFixed(1) || 'N/A'} dB<br>
+            Статус: ${status}<br>
+            <small>${data.timestamp || 'Текущие данные'}</small>
+        `
+    });
+    
+    const isSelected = selectedSensor == 99;
+    marker.options.set({
+        iconColor: color,
+        iconImageSize: isSelected ? [30, 30] : [22, 22]
     });
 }
 
-// Load sensor data for charts
+// Сообщение об отсутствии данных реального датчика
+function showNoRealSensorData() {
+    const metricsContainer = document.getElementById('current-metrics');
+    metricsContainer.innerHTML = `
+        <div class="col-12">
+            <div class="alert alert-warning text-center">
+                <h4>📡 Нет данных от реального датчика</h4>
+                <p>ESP32 еще не отправляла данные или произошла ошибка подключения</p>
+                <small>Проверьте подключение ESP32 к сети и работу сервера</small>
+            </div>
+        </div>
+    `;
+}
+
 // Load sensor data for charts
 function loadSensorData(sensorId) {
+    // Для реального датчика используем другую функцию
+    if (sensorId === 99) {
+        loadRealSensorData();
+        return;
+    }
+    
     fetch(`/api/sensor/${sensorId}?hours=24`)
         .then(response => response.json())
         .then(data => {
@@ -303,13 +354,54 @@ function loadSensorData(sensorId) {
         });
 }
 
+// Обновляем блоки над графиками - используем ТУ ЖЕ ЛОГИКУ
+function updateCurrentMetrics(data) {
+    const metricsContainer = document.getElementById('current-metrics');
+    metricsContainer.innerHTML = '';
+    
+    const metrics = [
+        { key: 'temperature', name: 'Температура', icon: '🌡️' },
+        { key: 'pressure', name: 'Давление', icon: '🌪️' },
+        { key: 'humidity', name: 'Влажность', icon: '💧' },
+        { key: 'gas_composition', name: 'Уровень CO₂', icon: '🌫️' },
+        { key: 'noise_level', name: 'Уровень шума', icon: '📢' }
+    ];
+    
+    metrics.forEach(metric => {
+        const dataset = data.datasets.find(ds => getParameterKey(ds.label) === metric.key);
+        if (dataset && dataset.data && dataset.data.length > 0) {
+            const latestValue = dataset.data[0];
+            const metricConfig = getMetricConfig(metric.key);
+            
+            // ← ВОТ ТА ЖЕ САМАЯ ПРОВЕРКА ЧТО И ДЛЯ КАРТЫ!
+            const isNormal = isParameterNormal(metric.key, latestValue);
+            const cardClass = isNormal ? 'border-success' : 'border-warning';
+            
+            const metricHTML = `
+                <div class="col">
+                    <div class="card ${cardClass}">
+                        <div class="card-body">
+                            <h5 class="card-title">${metric.icon} ${metric.name}</h5>
+                            <div class="value">${latestValue.toFixed(1)}${metricConfig.unit}</div>
+                            <div class="range-label" style="color: #666; font-size: 0.8rem; margin-top: 0.5rem;">диапазон нормы</div>
+                            <div class="range">${metricConfig.norm_min}-${metricConfig.norm_max} ${metricConfig.unit}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            metricsContainer.innerHTML += metricHTML;
+        }
+    });
+}
+
 // Новая функция - обновляем только один датчик на карте
 function updateSingleSensorStatus(sensorData) {
     for (const [sensorId, data] of Object.entries(sensorData)) {
         if (!sensorObjects[sensorId]) continue;
         
         const allNormal = areAllParametersNormal(data);
-        const color = allNormal ? (sensorObjects[sensorId].color || normalColor) : warningColor;
+        const color = allNormal ? normalColor : warningColor;
         const status = allNormal ? '🟢 Норма' : '🟠 Внимание';
         
         const marker = sensorObjects[sensorId].marker;
@@ -327,6 +419,58 @@ function updateSingleSensorStatus(sensorData) {
             `
         });
         
+        const isSelected = selectedSensor == sensorId;
+        marker.options.set({
+            iconColor: color,
+            iconImageSize: isSelected ? [30, 30] : [22, 22]
+        });
+    }
+}
+
+
+// Update sensor statuses on Yandex Map - FIXED: используем единую логику
+function updateSensorStatuses(latestData) {
+    // Сначала устанавливаем всем датчикам серый цвет (нет данных)
+    Object.entries(sensorObjects).forEach(([sensorId, sensorObj]) => {
+        const marker = sensorObj.marker;
+        const isSelected = selectedSensor == sensorId;
+        
+        marker.options.set({
+            iconColor: noDataColor,
+            iconImageSize: isSelected ? [30, 30] : [22, 22]
+        });
+        
+        marker.properties.set({
+            balloonContent: `<b>${sensorObj.name}</b><br>Статус: Нет данных`
+        });
+    });
+    
+    // Затем обновляем те датчики, для которых есть данные
+    for (const [sensorId, data] of Object.entries(latestData)) {
+        if (!sensorObjects[sensorId]) continue;
+        
+        // Проверяем ВСЕ параметры по фиксированным диапазонам
+        const allNormal = areAllParametersNormal(data);
+        const color = allNormal ? normalColor : warningColor;
+        const status = allNormal ? '🟢 Норма' : '🟠 Внимание';
+        
+        const marker = sensorObjects[sensorId].marker;
+        
+        // Update balloon content with ALL parameters
+        marker.properties.set({
+            balloonContent: `
+                <b>${sensorObjects[sensorId].name}</b><br>
+                Температура: ${data.temperature?.toFixed(1) || 'N/A'}°C<br>
+                Давление: ${data.pressure?.toFixed(1) || 'N/A'} kPa<br>
+                Влажность: ${data.humidity?.toFixed(1) || 'N/A'}%<br>
+                Уровень CO₂: ${data.gas_composition?.toFixed(1) || 'N/A'} ppm<br>
+                Уровень шума: ${data.noise_level?.toFixed(1) || 'N/A'} dB<br>
+                Статус: ${status}<br>
+                <small>${new Date(data.timestamp).toLocaleString('ru-RU')}</small>
+            `
+        });
+        
+        // Update color based on status, preserve selection state
         const isSelected = selectedSensor == sensorId;
         marker.options.set({
             iconColor: color,
@@ -676,7 +820,14 @@ function loadLatestReadings() {
     fetch('/api/latest')
         .then(response => response.json())
         .then(data => {
-            updateSensorStatuses(data);
+            // Фильтруем данные, оставляя только те, где есть все параметры
+            const validData = {};
+            for (const [sensorId, sensorData] of Object.entries(data)) {
+                if (hasSensorData(sensorData)) {
+                    validData[sensorId] = sensorData;
+                }
+            }
+            updateSensorStatuses(validData);
         })
         .catch(error => console.error('Error loading latest readings:', error));
 }
@@ -713,4 +864,59 @@ function updateLimitsInfo() {
     });
     
     limitsContainer.innerHTML = limitsHTML;
+}
+
+// Clear real sensor data
+function clearRealSensorData() {
+    if (!confirm('ВНИМАНИЕ! Это удалит все данные реального датчика ESP32. Продолжить?')) {
+        return;
+    }
+    
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '⏳ Очистка...';
+    button.disabled = true;
+    
+    fetch('/api/clear_real_sensor_data')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Данные реального датчика успешно очищены!');
+                loadSystemStats();
+                if (selectedSensor === 99) {
+                    loadRealSensorData();
+                }
+                loadLatestReadings();
+            } else {
+                alert('Ошибка очистки: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Ошибка очистки: ' + error);
+        })
+        .finally(() => {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+}
+
+// Функция для проверки, есть ли вообще данные у датчика
+function hasSensorData(data) {
+    return data && 
+           data.temperature !== undefined && 
+           data.pressure !== undefined && 
+           data.humidity !== undefined && 
+           data.gas_composition !== undefined && 
+           data.noise_level !== undefined;
+}
+
+// Обновляем функцию проверки нормальности с проверкой наличия данных
+function areAllParametersNormal(data) {
+    if (!hasSensorData(data)) return false;
+    
+    return isParameterNormal('temperature', data.temperature) &&
+           isParameterNormal('pressure', data.pressure) &&
+           isParameterNormal('humidity', data.humidity) &&
+           isParameterNormal('gas_composition', data.gas_composition) &&
+           isParameterNormal('noise_level', data.noise_level);
 }

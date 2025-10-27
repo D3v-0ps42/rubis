@@ -67,13 +67,37 @@
                     <div id="selected-sensor" class="selected-sensor-display">
                         <i class="fas fa-sensor"></i> Не выбран
                     </div>
+                    
+                    <!-- ТЕСТОВЫЕ ДАТЧИКИ -->
+                    <h5 style="color: #118899; margin-top: 15px; margin-bottom: 10px; font-weight: 600;">
+                        <i class="fas fa-microchip"></i> Тестовые датчики
+                    </h5>
                     <div class="sensor-list">
                         {% for sensor_id, sensor_info in sensor_locations.items() %}
+                        {% if sensor_id != 99 %}
                         <button class="sensor-btn" onclick="selectSensor({{ sensor_id }}, '{{ sensor_info.name }}')" 
                                 data-sensor-id="{{ sensor_id }}">
                             <i class="fas fa-microchip"></i> {{ sensor_info.name }}
                         </button>
+                        {% endif %}
                         {% endfor %}
+                    </div>
+                    
+                    <!-- РЕАЛЬНЫЙ ДАТЧИК -->
+                    <h5 style="color: #118899; margin-top: 20px; margin-bottom: 10px; font-weight: 600;">
+                        <i class="fas fa-satellite"></i> Реальный датчик
+                    </h5>
+                    <div class="sensor-list">
+                        <button class="sensor-btn" onclick="selectSensor(99, 'Реальный датчик ESP32')" 
+                                data-sensor-id="99">
+                            <i class="fas fa-satellite"></i> Реальный датчик ESP32
+                        </button>
+                        
+                        <!-- КНОПКА ОЧИСТКИ ДАННЫХ РЕАЛЬНОГО ДАТЧИКА -->
+                        <button class="btn btn-warning mt-2" onclick="clearRealSensorData()" 
+                                style="width: 100%; border-radius: 10px; padding: 0.6rem; font-size: 0.9rem; background: linear-gradient(135deg, #dc3545, #c82333); color: white; border: none;">
+                            <i class="fas fa-broom"></i> Очистить данные реального датчика
+                        </button>
                     </div>
                 </div>
 
