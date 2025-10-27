@@ -4,6 +4,7 @@ let selectedSensor = null;
 let sensorObjects = {};
 let sensorChart = null;
 let sensorConfig = null; // ← Добавляем для хранения конфига
+let sensorLocations = null;
 
 // Colors for sensors
 const normalColor = '#118899'; // Sibur blue
@@ -11,7 +12,11 @@ const warningColor = '#FF6B35'; // Sibur orange
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
-    loadSensorConfig().then(() => {
+    // Загружаем и конфиг и локации параллельно
+    Promise.all([
+        loadSensorConfig(),
+        loadSensorLocations()
+    ]).then(() => {
         initializeYandexMap();
         loadSystemStats();
         setInterval(loadSystemStats, 30000);
@@ -29,14 +34,20 @@ function loadSensorConfig() {
         })
         .catch(error => {
             console.error('Error loading sensor config:', error);
-            // Fallback конфиг на случай ошибки
-            sensorConfig = {
-                'temperature': { norm_min: 18.0, norm_max: 24.0, unit: '°C' },
-                'pressure': { norm_min: 98.0, norm_max: 105.0, unit: 'kPa' },
-                'humidity': { norm_min: 30.0, norm_max: 60.0, unit: '%' },
-                'gas_composition': { norm_min: 400.0, norm_max: 600.0, unit: 'ppm' },
-                'noise_level': { norm_min: 0.0, norm_max: 50.0, unit: 'dB' }
-            };
+            sensorConfig = null;
+        });
+}
+
+function loadSensorLocations() {
+    return fetch('/api/sensor_locations')
+        .then(response => response.json())
+        .then(locations => {
+            sensorLocations = locations;
+            console.log('Sensor locations loaded:', sensorLocations);
+        })
+        .catch(error => {
+            console.error('Error loading sensor locations:', error);
+            sensorLocations = null;
         });
 }
 
@@ -72,8 +83,12 @@ function initializeYandexMap() {
     script.src = 'https://api-maps.yandex.ru/2.1/?lang=ru_RU';
     script.onload = function() {
         ymaps.ready(function() {
+            // Используем координаты из конфига для центра карты
+            const firstLocation = sensorLocations ? Object.values(sensorLocations)[0] : null;
+            const center = firstLocation ? [firstLocation.lat, firstLocation.lng] : [43.414283, 39.950436];
+            
             ymap = new ymaps.Map('map', {
-                center: [43.414283, 39.950436],
+                center: center,
                 zoom: 17
             }, {
                 searchControlProvider: 'yandex#search'
@@ -88,13 +103,10 @@ function initializeYandexMap() {
 
 // Add sensors to Yandex Map - FIXED: use full names from config
 function addSensorMarkers() {
-    const sensorLocations = {
-        1: { lat: 43.414283, lng: 39.950436, name: 'Датчик №1 - Главный корпус' },
-        2: { lat: 43.4145, lng: 39.951, name: 'Датчик №2 - Лаборатория' },
-        3: { lat: 43.4138, lng: 39.9498, name: 'Датчик №3 - Склад' },
-        4: { lat: 43.415, lng: 39.9508, name: 'Датчик №4 - Парковка' },
-        5: { lat: 43.414, lng: 39.9512, name: 'Датчик №5 - Офис' }
-    };
+    if (!sensorLocations) {
+        console.error('Sensor locations not loaded');
+        return;
+    }
     
     for (const [sensorId, location] of Object.entries(sensorLocations)) {
         const marker = new ymaps.Placemark([location.lat, location.lng], {
@@ -102,7 +114,7 @@ function addSensorMarkers() {
             hintContent: location.name
         }, {
             preset: 'islands#circleIcon',
-            iconColor: normalColor,
+            iconColor: location.color || normalColor, // Используем цвет из конфига
             iconImageSize: [22, 22]
         });
         
@@ -113,7 +125,8 @@ function addSensorMarkers() {
         ymap.geoObjects.add(marker);
         sensorObjects[sensorId] = {
             marker: marker,
-            name: location.name
+            name: location.name,
+            color: location.color || normalColor // Сохраняем оригинальный цвет
         };
     }
 }
@@ -172,7 +185,7 @@ function updateSensorStatuses(latestData) {
         
         // Проверяем ВСЕ параметры по фиксированным диапазонам
         const allNormal = areAllParametersNormal(data);
-        const color = allNormal ? normalColor : warningColor;
+        const color = allNormal ? (sensorObjects[sensorId].color || normalColor) : warningColor;
         const status = allNormal ? '🟢 Норма' : '🟠 Внимание';
         
         const marker = sensorObjects[sensorId].marker;
@@ -242,6 +255,7 @@ function updateCurrentMetrics(data) {
 }
 
 // Load sensor data for charts
+// Load sensor data for charts
 function loadSensorData(sensorId) {
     fetch(`/api/sensor/${sensorId}?hours=24`)
         .then(response => response.json())
@@ -254,11 +268,71 @@ function loadSensorData(sensorId) {
             
             updateCurrentMetrics(data);
             updateCharts(data);
+            
+            // ОБНОВЛЯЕМ СТАТУС НА КАРТЕ ТЕМИ ЖЕ ДАННЫМИ ЧТО И ДЛЯ ГРАФИКОВ!
+            if (data.datasets && data.datasets.length > 0) {
+                const latestValues = {};
+                
+                // Берем последние значения из графиков
+                data.datasets.forEach(dataset => {
+                    const paramKey = getParameterKey(dataset.label);
+                    if (dataset.data && dataset.data.length > 0) {
+                        latestValues[paramKey] = dataset.data[0]; // Первое значение = самое свежее
+                    }
+                });
+                
+                // Создаем объект в том же формате что и /api/latest
+                const sensorLatestData = {
+                    [sensorId]: {
+                        temperature: latestValues.temperature || 0,
+                        pressure: latestValues.pressure || 0,
+                        humidity: latestValues.humidity || 0,
+                        gas_composition: latestValues.gas_composition || 0,
+                        noise_level: latestValues.noise_level || 0,
+                        timestamp: new Date().toISOString()
+                    }
+                };
+                
+                // Обновляем только выбранный датчик на карте
+                updateSingleSensorStatus(sensorLatestData);
+            }
         })
         .catch(error => {
             console.error('Error loading sensor data:', error);
             showNoDataMessage();
         });
+}
+
+// Новая функция - обновляем только один датчик на карте
+function updateSingleSensorStatus(sensorData) {
+    for (const [sensorId, data] of Object.entries(sensorData)) {
+        if (!sensorObjects[sensorId]) continue;
+        
+        const allNormal = areAllParametersNormal(data);
+        const color = allNormal ? (sensorObjects[sensorId].color || normalColor) : warningColor;
+        const status = allNormal ? '🟢 Норма' : '🟠 Внимание';
+        
+        const marker = sensorObjects[sensorId].marker;
+        
+        marker.properties.set({
+            balloonContent: `
+                <b>${sensorObjects[sensorId].name}</b><br>
+                Температура: ${data.temperature?.toFixed(1) || 'N/A'}°C<br>
+                Давление: ${data.pressure?.toFixed(1) || 'N/A'} kPa<br>
+                Влажность: ${data.humidity?.toFixed(1) || 'N/A'}%<br>
+                Уровень CO₂: ${data.gas_composition?.toFixed(1) || 'N/A'} ppm<br>
+                Уровень шума: ${data.noise_level?.toFixed(1) || 'N/A'} dB<br>
+                Статус: ${status}<br>
+                <small>${new Date().toLocaleString('ru-RU')}</small>
+            `
+        });
+        
+        const isSelected = selectedSensor == sensorId;
+        marker.options.set({
+            iconColor: color,
+            iconImageSize: isSelected ? [30, 30] : [22, 22]
+        });
+    }
 }
 
 // Show no data message
@@ -611,4 +685,32 @@ function loadLatestReadings() {
 function updateSystemStatus(stats) {
     document.getElementById('active-sensors').textContent = stats.active_sensors;
     document.getElementById('total-records').textContent = stats.total_records;
+}
+
+function updateLimitsInfo() {
+    const limitsContainer = document.getElementById('limits-container');
+    
+    if (!sensorConfig) {
+        limitsContainer.innerHTML = '<div class="limit-item">Загрузка конфигурации...</div>';
+        return;
+    }
+    
+    let limitsHTML = '';
+    
+    // Порядок параметров как в конфиге
+    const paramOrder = ['temperature', 'pressure', 'humidity', 'gas_composition', 'noise_level'];
+    
+    paramOrder.forEach(param => {
+        const config = sensorConfig[param];
+        if (config) {
+            limitsHTML += `
+                <div class="limit-item">
+                    <strong><i class="fas fa-gauge-high"></i> ${config.name}:</strong><br>
+                    <span>${config.norm_min} - ${config.norm_max} ${config.unit}</span>
+                </div>
+            `;
+        }
+    });
+    
+    limitsContainer.innerHTML = limitsHTML;
 }

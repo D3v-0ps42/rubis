@@ -96,7 +96,7 @@
                     {% for param, config in sensor_config.items() %}
                     <div class="limit-item">
                         <strong><i class="fas fa-gauge-high"></i> {{ config.name }}:</strong><br>
-                        <span>{{ config.min }} - {{ config.max }} {{ config.unit }}</span>
+                        <span>{{ config.norm_min }} - {{ config.norm_max }} {{ config.unit }}</span>
                     </div>
                     {% endfor %}
                 </div>

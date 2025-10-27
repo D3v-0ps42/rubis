@@ -157,5 +157,11 @@ def get_sensor_config():
     """Отдаем конфигурацию датчиков в JavaScript"""
     return jsonify(SENSOR_CONFIG)
 
+# app.py - добавляем новый endpoint
+@app.route('/api/sensor_locations')
+def get_sensor_locations():
+    """Отдаем локации датчиков в JavaScript"""
+    return jsonify(SENSOR_LOCATIONS)
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
