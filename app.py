@@ -46,24 +46,43 @@ def get_sensor_data(sensor_id):
     timestamps = sensor_data['timestamp'].dt.strftime('%H:%M').tolist()
     timestamps.reverse()
     
-    datasets = []
-    for dataset_config in [
-        {'label': 'Температура', 'field': 'temperature', 'color': '#118899'},
-        {'label': 'Давление', 'field': 'pressure', 'color': '#4FA8B5'},
-        {'label': 'Влажность', 'field': 'humidity', 'color': '#0D6A77'},
-        {'label': 'Уровень CO₂', 'field': 'gas_composition', 'color': '#1A9BA8'},
-        {'label': 'Уровень шума', 'field': 'noise_level', 'color': '#2CA3B0'}
-    ]:
-        data = sensor_data[dataset_config['field']].tolist()
-        data.reverse()
-        
-        datasets.append({
-            'label': dataset_config['label'],
-            'data': data,
-            'borderColor': dataset_config['color'],
-            'backgroundColor': 'rgba(17, 136, 153, 0.1)',
-            'yAxisID': 'y' if dataset_config['field'] in ['temperature', 'humidity', 'noise_level'] else 'y1'
-        })
+    datasets = [
+    {
+        'label': 'Температура',
+        'data': sensor_data['temperature'].tolist(),
+        'borderColor': '#0D6A77',  # Темный синий
+        'backgroundColor': 'rgba(13, 106, 119, 0.1)',
+        'yAxisID': 'y'
+    },
+    {
+        'label': 'Давление', 
+        'data': sensor_data['pressure'].tolist(),
+        'borderColor': '#4FA8B5',  # Светлый синий
+        'backgroundColor': 'rgba(79, 168, 181, 0.1)',
+        'yAxisID': 'y1'
+    },
+    {
+        'label': 'Влажность',
+        'data': sensor_data['humidity'].tolist(), 
+        'borderColor': '#2E8B57',  # Морской зеленый
+        'backgroundColor': 'rgba(46, 139, 87, 0.1)',
+        'yAxisID': 'y'
+    },
+    {
+        'label': 'Уровень CO₂',
+        'data': sensor_data['gas_composition'].tolist(),
+        'borderColor': '#8A2BE2',  # Сине-фиолетовый
+        'backgroundColor': 'rgba(138, 43, 226, 0.1)',
+        'yAxisID': 'y1'
+    },
+    {
+        'label': 'Уровень шума',
+        'data': sensor_data['noise_level'].tolist(),
+        'borderColor': '#FF6347',  # Томатный красный
+        'backgroundColor': 'rgba(255, 99, 71, 0.1)',
+        'yAxisID': 'y'
+    }
+]
     
     data = {
         'timestamps': timestamps,

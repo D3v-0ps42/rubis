@@ -387,11 +387,11 @@ function updateCharts(sensorData = null) {
             labels: sensorData.timestamps,
             datasets: filteredDatasets.map((dataset, index) => {
                 const colors = [
-                    { border: '#118899', background: 'rgba(17, 136, 153, 0.1)' },
-                    { border: '#4FA8B5', background: 'rgba(79, 168, 181, 0.1)' },
-                    { border: '#0D6A77', background: 'rgba(13, 106, 119, 0.1)' },
-                    { border: '#1A9BA8', background: 'rgba(26, 155, 168, 0.1)' },
-                    { border: '#2CA3B0', background: 'rgba(44, 163, 176, 0.1)' }
+                    { border: '#0D6A77', background: 'rgba(13, 106, 119, 0.1)' },  // Темный синий
+                    { border: '#4FA8B5', background: 'rgba(79, 168, 181, 0.1)' },  // Светлый синий  
+                    { border: '#2E8B57', background: 'rgba(46, 139, 87, 0.1)' },   // Морской зеленый
+                    { border: '#8A2BE2', background: 'rgba(138, 43, 226, 0.1)' },  // Сине-фиолетовый
+                    { border: '#FF6347', background: 'rgba(255, 99, 71, 0.1)' }    // Томатный красный
                 ];
                 const color = colors[index % colors.length];
                 
@@ -543,7 +543,7 @@ function updateStatisticsDisplay(stats) {
     `;
     
     // Averages
-    let averagesHTML = '<div class="col-md-4"><div class="metric-card"><h4>📊 Средние значения</h4>';
+    let averagesHTML = '<div class="col-md-4"><div class="metric-card"><h4>📊 Средние значения за 1 час</h4>';
     const paramOrder = ['temperature', 'pressure', 'humidity', 'gas_composition', 'noise_level'];
     
     let hasAverages = false;
